@@ -41,6 +41,14 @@ def run(opts):
     problem = load_problem(opts.problem)(
                             p_size = opts.graph_size, 
                             with_assert = not opts.no_assert)
+    
+    # Load optimal tours if requested
+    if opts.use_optimal_tours and opts.optimal_tours_path is not None:
+        print(f'  [*] Loading optimal tours from {opts.optimal_tours_path}')
+        success = problem.load_optimal_tours(opts.optimal_tours_path)
+        if not success:
+            print('  [!] Warning: Could not load optimal tours. Edge overlap rewards will be disabled.')
+            opts.use_optimal_tours = False
 
     # Load data from load_path
     load_data = {}

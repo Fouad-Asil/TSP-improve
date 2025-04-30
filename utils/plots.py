@@ -11,6 +11,9 @@ from matplotlib import pyplot as plt
 import cv2
 import io
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 def plot_grad_flow(model):
     '''Plots the gradients flowing through different layers in the net during training.
@@ -118,6 +121,6 @@ def plot_heatmap(problem, solutions, predicted_feasibility):
     sns.heatmap(predicted_feasibility.detach(), ax = ax1)
     sns.heatmap(true_feasibility[0], ax = ax2)
     
-    plt.show()
+    plt.close(fig)
     
     

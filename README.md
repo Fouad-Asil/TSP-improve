@@ -15,6 +15,26 @@ For more details, please see the paper [Wu et. al., *Learning Improvement Heuris
 }
 ```
 
+# Enhanced Reward Mechanism Using Optimal Tours
+This implementation extends the original approach by incorporating a mechanism to leverage pre-computed optimal tours during training. The new features include:
+
+1. **Edge Overlap Reward:** The agent receives an additional reward when it increases the number of edges in its solution that match the edges in the known optimal tour. This provides a denser learning signal and guides the agent toward better solution structures.
+
+2. **Edge Breaking Penalty:** Optionally, the agent can be penalized for breaking edges that are part of the optimal solution, encouraging it to preserve good solution components.
+
+To use these features, you need to:
+1. Pre-compute optimal tours for your training instances using a solver like OR-Tools or Concorde
+2. Store the tours in a pickle file in the same format as the training data
+3. Enable the features with the following command-line arguments:
+
+```
+--use_optimal_tours --optimal_tours_path PATH_TO_OPTIMAL_TOURS --overlap_reward_weight 0.2 --break_penalty_weight 0.0
+```
+
+The weights control the balance between the original cost-based reward and the new structure-based components:
+- `overlap_reward_weight` (β): Weight for rewarding improvement in edge overlap (recommended: 0.1-0.3)
+- `break_penalty_weight` (γ): Weight for penalizing the breaking of optimal edges (recommended: start with 0, increase if needed)
+
 # One more thing
 You may also be interested in our new approaches:
 

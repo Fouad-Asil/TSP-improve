@@ -1,0 +1,16 @@
+{
+    "baseline": {
+        "init_cost": 52.19977951049805,
+        "final_cost": 12.58179759979248,
+        "improvement": 39.61798095703125,
+        "improvement_percent": 75.89683582679419,
+        "time": 59.55584716796875
+    },
+    "overlap": {
+        "init_cost": 52.19977951049805,
+        "final_cost": 12.937305450439453,
+        "improvement": 39.262474060058594,
+        "improvement_percent": 75.21578525472968,
+        "time": 58.76322937011719
+    }
+}

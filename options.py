@@ -72,6 +72,14 @@ def get_options(args=None):
     parser.add_argument('--gamma', type=float, default=0.8, help='decrease future reward')
     parser.add_argument('--T_max', type=int, default=1000, help='number of steps to swap')
     
+    ### optimal tour utilization
+    parser.add_argument('--use_optimal_tours', action='store_true', help='Use optimal tours during training')
+    parser.add_argument('--optimal_tours_path', type=str, default=None, help='Path to pre-computed optimal tours')
+    parser.add_argument('--overlap_reward_weight', type=float, default=0.2, 
+                        help='Weight for edge overlap improvement reward (beta)')
+    parser.add_argument('--break_penalty_weight', type=float, default=0.0, 
+                        help='Weight for penalty when breaking optimal edges (gamma)')
+    
     ### logs to tensorboard and screen
     parser.add_argument('--no_progress_bar', action='store_true', help='Disable progress bar')
     parser.add_argument('--no_tensorboard', action='store_true', help='Disable logging TensorBoard files')

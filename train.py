@@ -130,6 +130,8 @@ def validate(problem, model, val_dataset, tb_logger, opts, _id = None):
     
     # save to file
     if _id is not None:
+        save_path = os.path.join(opts.save_dir, f'validate-{_id}.pt')
+        os.makedirs(os.path.dirname(save_path), exist_ok=True) # Ensure directory exists
         torch.save(
         {
             'init_value': init_value,
@@ -138,7 +140,7 @@ def validate(problem, model, val_dataset, tb_logger, opts, _id = None):
             'reward': reward,
             'time_used': time_used,
         },
-        os.path.join(opts.save_dir, 'validate-{}.pt'.format(_id)))
+        save_path)
         
     
 
@@ -184,6 +186,8 @@ def train_epoch(problem, model, optimizer, baseline, lr_scheduler, epoch, val_da
 
     if (opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0) or epoch == opts.n_epochs - 1:
         print('Saving model and state...')
+        save_path = os.path.join(opts.save_dir, f'epoch-{epoch}.pt')
+        os.makedirs(os.path.dirname(save_path), exist_ok=True) # Ensure directory exists
         torch.save(
             {
                 'model': get_inner_model(model).state_dict(),
@@ -192,8 +196,7 @@ def train_epoch(problem, model, optimizer, baseline, lr_scheduler, epoch, val_da
                 'cuda_rng_state': torch.cuda.get_rng_state_all(),
                 'baseline': baseline.state_dict()
             },
-            os.path.join(opts.save_dir, 'epoch-{}.pt'.format(epoch))
-        )
+            save_path)
     
     validate(problem, model, val_dataset, tb_logger, opts, _id = epoch)
           
@@ -225,10 +228,38 @@ def train_batch(
     batch = move_to(batch, opts.device) # batch_size, graph_size, 2
     exchange = None	
     
+    # Get optimal tours if enabled
+    optimal_tours = None
+    if opts.use_optimal_tours and problem.optimal_tours is not None:
+        start_idx = batch_id * opts.batch_size
+        # Ensure we don't slice beyond the available optimal tours
+        end_idx = min(start_idx + opts.batch_size, len(problem.optimal_tours))
+        # Only proceed if there are tours for this slice
+        if start_idx < end_idx:
+            optimal_tours_slice = problem.optimal_tours[start_idx:end_idx]
+            # Ensure the slice matches the actual batch size being processed
+            current_batch_size = batch.size(0) # Get the real size of this batch
+            if len(optimal_tours_slice) == current_batch_size:
+                 optimal_tours = move_to(torch.tensor(optimal_tours_slice), opts.device)
+            else:
+                 # Handle mismatch - perhaps skip overlap calculation for this batch or log a warning
+                 print(f"Warning: Batch size ({current_batch_size}) and optimal tours slice size ({len(optimal_tours_slice)}) mismatch for batch_id {batch_id}. Skipping overlap calculation.")
+                 optimal_tours = None # Prevent using mismatched tours
+
     #update best_so_far
     best_so_far = problem.get_costs(batch, solution)
     initial_cost = best_so_far.clone()
     
+    # Calculate initial edge overlap if using optimal tours
+    prev_overlap = None
+    if optimal_tours is not None:
+        # Ensure the solution batch size matches optimal_tours batch size before calculating
+        if solution.size(0) == optimal_tours.size(0):
+             prev_overlap = problem.calculate_edge_overlap(solution, optimal_tours)
+        else:
+             print(f"Warning: Mismatch between solution batch size ({solution.size(0)}) and optimal_tours batch size ({optimal_tours.size(0)}). Skipping overlap calculation.")
+             optimal_tours = None # Ensure downstream code doesn't use mismatched tours
+
     # params
     gamma = opts.gamma
     n_step = opts.n_step
@@ -241,6 +272,8 @@ def train_batch(
         baseline_val_detached = []
         log_likelihood = []
         reward = []
+        overlap_rewards = []
+        penalty_rewards = []
         
         t_s = t
         
@@ -265,6 +298,17 @@ def train_batch(
             exchange_history.append(exchange)
             log_likelihood.append(log_lh)
             
+            # Calculate penalties for breaking optimal edges if using optimal tours
+            penalty = torch.zeros_like(best_so_far)
+            if optimal_tours is not None and opts.break_penalty_weight > 0:
+                 # Add similar size check here
+                 if solution.size(0) == optimal_tours.size(0):
+                     broken_edges = problem.calculate_broken_optimal_edges(solution, exchange, optimal_tours)
+                     penalty = opts.break_penalty_weight * broken_edges
+                 else:
+                     # Handle mismatch if necessary, maybe penalty remains zero
+                     print(f"Warning: Mismatch during penalty calculation. Sol size: {solution.size(0)}, Opt size: {optimal_tours.size(0)}")
+
             # state transient
             solution = problem.step(solution, exchange)
             solution = move_to(solution, opts.device)
@@ -273,7 +317,37 @@ def train_batch(
             cost = problem.get_costs(batch, solution)
             total_cost = total_cost + cost
             best_for_now = torch.cat((best_so_far[None,:], cost[None,:]),0).min(0)[0]
-            reward.append(best_so_far - best_for_now)
+            
+            # Calculate edge overlap reward if using optimal tours
+            overlap_reward = torch.zeros_like(best_so_far)
+            if optimal_tours is not None and opts.overlap_reward_weight > 0:
+                 # Add similar size check here
+                 if solution.size(0) == optimal_tours.size(0):
+                     curr_overlap = problem.calculate_edge_overlap(solution, optimal_tours)
+                     # Check if prev_overlap was calculated for this batch size
+                     if prev_overlap is not None and prev_overlap.size(0) == curr_overlap.size(0):
+                         overlap_reward = opts.overlap_reward_weight * (curr_overlap - prev_overlap)
+                         prev_overlap = curr_overlap # Update prev_overlap only if calculated
+                     else:
+                         # Handle case where prev_overlap wasn't set correctly for this batch
+                         print(f"Warning: Mismatch or missing prev_overlap during overlap reward calculation.")
+                         # Decide how to handle this: recalculate prev_overlap or skip reward?
+                         # Option 1: Recalculate prev_overlap (might be slightly off if solution changed significantly)
+                         # prev_overlap = problem.calculate_edge_overlap(solution, optimal_tours)
+                         # Option 2: Skip overlap reward calculation for this step
+                         overlap_reward = torch.zeros_like(best_so_far) # Keep reward zero
+
+                 else:
+                     print(f"Warning: Mismatch during overlap reward calculation. Sol size: {solution.size(0)}, Opt size: {optimal_tours.size(0)}")
+
+            # Calculate standard improvement reward
+            improvement_reward = best_so_far - best_for_now
+            
+            # Combine rewards: improvement + overlap reward - edge breaking penalty
+            combined_reward = improvement_reward + overlap_reward - penalty
+            reward.append(combined_reward)
+            
+            # Update best_so_far for next iteration
             best_so_far = best_for_now
             
             # next            
@@ -316,7 +390,17 @@ def train_batch(
         if(not opts.no_tb):
             current_step = int(step * T / n_step + t // n_step)
             if current_step % int(opts.log_step) == 0:
+                # Prepare overlap rewards and penalties for logging if they exist
+                overlap_rewards_data = None
+                if overlap_rewards:
+                    overlap_rewards_data = torch.stack(overlap_rewards, 0)
+                    
+                penalty_rewards_data = None
+                if penalty_rewards:
+                    penalty_rewards_data = torch.stack(penalty_rewards, 0)
+                
                 log_to_tb_train(tb_logger, optimizer, model, baseline, total_cost, grad_norms, reward, 
-                   exchange_history, reinforce_loss, baseline_loss, log_likelihood, initial_cost, current_step)
+                   exchange_history, reinforce_loss, baseline_loss, log_likelihood, initial_cost, current_step,
+                   overlap_rewards=overlap_rewards_data, penalty_rewards=penalty_rewards_data)
         
         pbar.update(1)

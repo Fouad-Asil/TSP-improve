@@ -1,0 +1,4 @@
+graph_size=20
+n_epochs=10
+overlap_weight=0.2
+break_penalty=0.0

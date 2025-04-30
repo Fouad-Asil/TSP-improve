@@ -12,7 +12,117 @@ class TSP(object):
 
         self.size = p_size          # the number of nodes in tsp 
         self.do_assert = with_assert
+        self.optimal_tours = None   # Will store optimal tours if provided
         print(f'TSP with {self.size} nodes.')
+    
+    def load_optimal_tours(self, file_path):
+        """Load pre-computed optimal tours from file"""
+        if file_path is None or not os.path.exists(file_path):
+            print(f"Warning: Optimal tours file {file_path} not found.")
+            return False
+            
+        try:
+            with open(file_path, 'rb') as f:
+                self.optimal_tours = pickle.load(f)
+            print(f"Loaded {len(self.optimal_tours)} optimal tours.")
+            return True
+        except Exception as e:
+            print(f"Error loading optimal tours: {e}")
+            return False
+    
+    def calculate_edge_overlap(self, tours, optimal_tours):
+        """
+        Calculate the edge overlap between current tours and optimal tours
+        
+        Args:
+            tours: (batch_size, graph_size) current tours
+            optimal_tours: (batch_size, graph_size) optimal tours
+            
+        Returns:
+            overlap: (batch_size) number of shared edges
+        """
+        batch_size, graph_size = tours.size()
+        device = tours.device
+        
+        # Initialize overlap count
+        overlap = torch.zeros(batch_size, device=device)
+        
+        # Convert to numpy for processing
+        tours_np = tours.cpu().numpy()
+        optimal_tours_np = optimal_tours.cpu().numpy()
+        
+        for i in range(batch_size):
+            # Get edges in current tour (include the last edge connecting back to start)
+            tour_edges = set()
+            for j in range(graph_size):
+                n1, n2 = tours_np[i][j], tours_np[i][(j+1) % graph_size]
+                # Undirected edge - store in canonical form (smaller node first)
+                tour_edges.add((min(n1, n2), max(n1, n2)))
+            
+            # Get edges in optimal tour
+            opt_edges = set()
+            for j in range(graph_size):
+                n1, n2 = optimal_tours_np[i][j], optimal_tours_np[i][(j+1) % graph_size]
+                opt_edges.add((min(n1, n2), max(n1, n2)))
+            
+            # Count overlap
+            overlap[i] = len(tour_edges.intersection(opt_edges))
+        
+        return overlap
+    
+    def calculate_broken_optimal_edges(self, tours, exchange, optimal_tours):
+        """
+        Calculate how many optimal edges would be broken by an exchange
+        
+        Args:
+            tours: (batch_size, graph_size) current tours
+            exchange: (batch_size, 2) nodes to exchange
+            optimal_tours: (batch_size, graph_size) optimal tours
+            
+        Returns:
+            broken_count: (batch_size) number of optimal edges that would be broken
+        """
+        batch_size = tours.size(0)
+        device = tours.device
+        
+        # Initialize broken count
+        broken_count = torch.zeros(batch_size, device=device)
+        
+        # Convert to numpy for processing
+        tours_np = tours.cpu().numpy()
+        exchange_np = exchange.cpu().numpy()
+        optimal_tours_np = optimal_tours.cpu().numpy()
+        
+        for i in range(batch_size):
+            # Get edges in optimal tour
+            opt_edges = set()
+            for j in range(self.size):
+                n1, n2 = optimal_tours_np[i][j], optimal_tours_np[i][(j+1) % self.size]
+                opt_edges.add((min(n1, n2), max(n1, n2)))
+            
+            # Find which edges would be removed by this exchange
+            loc_of_first = np.where(tours_np[i] == exchange_np[i][0])[0][0]
+            loc_of_second = np.where(tours_np[i] == exchange_np[i][1])[0][0]
+            
+            # Adjustment for 2-opt
+            if loc_of_first > loc_of_second:
+                loc_of_first, loc_of_second = loc_of_second, loc_of_first
+            
+            # Edges that would be broken (one before first, one after second, and connection between)
+            broken_edges = set()
+            
+            # Edge before first node
+            n1, n2 = tours_np[i][(loc_of_first-1) % self.size], tours_np[i][loc_of_first]
+            broken_edges.add((min(n1, n2), max(n1, n2)))
+            
+            # Edge after second node
+            n1, n2 = tours_np[i][loc_of_second], tours_np[i][(loc_of_second+1) % self.size]
+            broken_edges.add((min(n1, n2), max(n1, n2)))
+            
+            # Count how many of these are optimal edges
+            broken_count[i] = len(broken_edges.intersection(opt_edges))
+        
+        return broken_count
     
     def step(self, rec, exchange):
         
