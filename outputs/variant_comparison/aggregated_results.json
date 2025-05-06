@@ -1,0 +1,34 @@
+{
+    "20": {
+        "baseline": {
+            "init_cost": 10.42790699005127,
+            "final_cost": 3.9821677207946777,
+            "improvement": 6.445739269256592,
+            "improvement_percent": 61.81239701702499,
+            "time": 17.803508758544922
+        },
+        "overlap": {
+            "init_cost": 10.42790699005127,
+            "final_cost": 4.099928379058838,
+            "improvement": 6.327978610992432,
+            "improvement_percent": 60.683113275076494,
+            "time": 16.636810302734375
+        }
+    },
+    "50": {
+        "baseline": {
+            "init_cost": 26.154369354248047,
+            "final_cost": 8.709654808044434,
+            "improvement": 17.444713592529297,
+            "improvement_percent": 66.69904120512044,
+            "time": 30.451948165893555
+        },
+        "overlap": {
+            "init_cost": 26.154369354248047,
+            "final_cost": 8.233551025390625,
+            "improvement": 17.920818328857422,
+            "improvement_percent": 68.51940525167618,
+            "time": 31.02735710144043
+        }
+    }
+}
